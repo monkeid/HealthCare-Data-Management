@@ -1,53 +1,58 @@
-import createClient from "openapi-fetch";
-import { components, paths } from "./schema";
+import { AdvInput, AdvOutput, RollupState } from "@cartesi/rollup-devkit";
 
-type AdvanceRequestData = components["schemas"]["Advance"];
-type InspectRequestData = components["schemas"]["Inspect"];
-type RequestHandlerResult = components["schemas"]["Finish"]["status"];
-type RollupsRequest = components["schemas"]["RollupRequest"];
-type InspectRequestHandler = (data: InspectRequestData) => Promise<void>;
-type AdvanceRequestHandler = (
-  data: AdvanceRequestData
-) => Promise<RequestHandlerResult>;
+interface PatientData {
+  name: string;
+  age: number;
+  // Add more fields as needed
+}
 
-const rollupServer = process.env.ROLLUP_HTTP_SERVER_URL;
-console.log("HTTP rollup_server url is " + rollupServer);
+interface HealthcareState extends RollupState {
+  patients: { [id: string]: PatientData };
+}
 
-const handleAdvance: AdvanceRequestHandler = async (data) => {
-  console.log("Received advance request data " + JSON.stringify(data));
-  return "accept";
-};
+function handleAddPatient(
+  state: HealthcareState,
+  id: string,
+  data: PatientData
+): AdvOutput {
+  state.patients[id] = data;
+  return { state, logs: [`Patient ${id} added successfully`], notices: [] };
+}
 
-const handleInspect: InspectRequestHandler = async (data) => {
-  console.log("Received inspect request data " + JSON.stringify(data));
-};
-
-const main = async () => {
-  const { POST } = createClient<paths>({ baseUrl: rollupServer });
-  let status: RequestHandlerResult = "accept";
-  while (true) {
-    const { response } = await POST("/finish", {
-      body: { status },
-      parseAs: "text",
-    });
-
-    if (response.status === 200) {
-      const data = (await response.json()) as RollupsRequest;
-      switch (data.request_type) {
-        case "advance_state":
-          status = await handleAdvance(data.data as AdvanceRequestData);
-          break;
-        case "inspect_state":
-          await handleInspect(data.data as InspectRequestData);
-          break;
-      }
-    } else if (response.status === 202) {
-      console.log(await response.text());
-    }
+function handleGetPatient(state: HealthcareState, id: string): AdvOutput {
+  const patient = state.patients[id];
+  if (patient) {
+    return {
+      state,
+      logs: [`Retrieved patient ${id}`],
+      notices: [JSON.stringify(patient)],
+    };
+  } else {
+    return { state, logs: [`Patient ${id} not found`], notices: [] };
   }
-};
+}
 
-main().catch((e) => {
-  console.log(e);
-  process.exit(1);
-});
+export function handleAdvance(
+  state: HealthcareState,
+  input: AdvInput
+): AdvOutput {
+  const { payload } = input;
+  const request = JSON.parse(payload);
+
+  switch (request.method) {
+    case "addPatient":
+      return handleAddPatient(state, request.id, request.data);
+    case "getPatient":
+      return handleGetPatient(state, request.id);
+    default:
+      return { state, logs: ["Invalid method"], notices: [] };
+  }
+}
+
+export function handleInspect(
+  state: HealthcareState,
+  input: AdvInput
+): AdvOutput {
+  // Implement inspection logic if needed
+  return { state, logs: [], notices: [] };
+}
